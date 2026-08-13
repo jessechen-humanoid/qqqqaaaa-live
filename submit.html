@@ -214,15 +214,33 @@
         });
       }
 
-      // 以 code point（Array.from）計數，超過上限則截斷輸入
-      function clampToCodePoints(el, limit, counterEl){
+      // 以 code point（Array.from）計數，超過上限則截斷輸入。
+      // truncate=false 時只更新計數不動內容——中文輸入法（注音/拼音）組字期間
+      // 改寫 el.value 會打斷組字、讓使用者無法選字，所以組字中絕不能截斷。
+      function clampToCodePoints(el, limit, counterEl, truncate){
         var arr = Array.from(el.value);
-        if (arr.length > limit) {
+        if (truncate !== false && arr.length > limit) {
           el.value = arr.slice(0, limit).join('');
           arr = Array.from(el.value);
         }
-        counterEl.textContent = arr.length + '/' + limit;
+        counterEl.textContent = Math.min(arr.length, 99) + '/' + limit;
         counterEl.classList.toggle('limit', arr.length >= limit);
+      }
+
+      // IME 組字保護：組字中只更新計數，選字完成（compositionend）才截斷
+      function bindLimited(el, limit, counterEl){
+        var composing = false;
+        el.addEventListener('compositionstart', function(){ composing = true; });
+        el.addEventListener('compositionend', function(){
+          composing = false;
+          clampToCodePoints(el, limit, counterEl, true);
+          updatePreview();
+        });
+        el.addEventListener('input', function(e){
+          var inComposition = composing || (e && e.isComposing);
+          clampToCodePoints(el, limit, counterEl, !inComposition);
+          updatePreview();
+        });
       }
 
       function updatePreview(){
@@ -233,14 +251,8 @@
           '上幕預覽：<b>' + esc(table) + '</b> <b>' + esc(nick) + '</b>｜' + esc(question);
       }
 
-      nickInput.addEventListener('input', function(){
-        clampToCodePoints(nickInput, NICK_LIMIT, nickCounter);
-        updatePreview();
-      });
-      questionInput.addEventListener('input', function(){
-        clampToCodePoints(questionInput, QUESTION_LIMIT, questionCounter);
-        updatePreview();
-      });
+      bindLimited(nickInput, NICK_LIMIT, nickCounter);
+      bindLimited(questionInput, QUESTION_LIMIT, questionCounter);
       tableSelect.addEventListener('change', updatePreview);
       updatePreview();
 
