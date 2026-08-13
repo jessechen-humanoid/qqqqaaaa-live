@@ -114,6 +114,7 @@
       <div><label>軌道數</label><input id="f_lanes" type="number"></div>
       <div><label>同屏</label><input id="f_max" type="number"></div>
       <div><label>滴放ms</label><input id="f_drip" type="number"></div>
+      <div><label>補位ms</label><input id="f_fill" type="number"></div>
     </div>
     <label>情境快切（按 1 / 2 / 3）</label>
     <div class="scenes">
@@ -138,6 +139,7 @@
     speedGroups: [120, 170, 230],
     fontGroups:  [3.6, 4.8, 6.5],
     lanes: 12, maxOnScreen: 60, dripMs: 70, laneGap: 1.0,
+    fillMs: 1200,   // 沒新投稿時的補位間隔（重播既有投稿）
   };
   const SCENES = {
     calm:   { maxOnScreen: 25,  dripMs: 160 },
@@ -242,19 +244,34 @@
     document.getElementById('dbWarn').style.display = 'flex';
   } else {
     const subsRef = db.ref('rooms/' + ROOM + '/submissions');
-    const startAt = Date.now();
-    const liveQ = subsRef.orderByChild('ts').startAt(startAt);
+    const pageOpenAt = Date.now();   // 只用於 clearAt 判斷，不再過濾投稿（時鐘偏差不影響顯示）
 
-    liveQ.on('child_added', snap => {
+    // 全量訂閱進 items：彈幕、重播池、發問計數共用同一份資料
+    const items = new Map();         // key -> submission
+    let initialLoaded = false;
+    subsRef.once('value').then(() => { initialLoaded = true; })
+                         .catch(() => { initialLoaded = true; });
+
+    subsRef.on('child_added', snap => {
       const it = snap.val(); if(!it) return;
-      const key = snap.key, vis = isEligible(it);
-      subMap.set(key, { vis, el: null });
-      if(vis) queue.push({ key, table: it.table, nick: it.nick, question: it.question });
+      const key = snap.key;
+      items.set(key, it);
+      subMap.set(key, { vis: isEligible(it), el: null });
+      askerSet.add(String(it.table || '') + '\u0001' + String(it.nick || ''));
+      askerCountEl.textContent = askerSet.size;
+      // 初始載入完成後才到達的 = 現場新投稿 → 插到佇列最前端，永遠先於補位重播
+      if(initialLoaded && isEligible(it)){
+        queue.unshift({ key, table: it.table, nick: it.nick, question: it.question });
+      }
     });
 
-    liveQ.on('child_changed', snap => {
+    subsRef.on('child_removed', snap => { items.delete(snap.key); subMap.delete(snap.key); });
+
+    subsRef.on('child_changed', snap => {
       const it = snap.val(); if(!it) return;
-      const key = snap.key, m = subMap.get(key); if(!m) return;
+      const key = snap.key;
+      items.set(key, it);
+      const m = subMap.get(key); if(!m) return;
       const vis = isEligible(it);
       if(m.vis && !vis){
         if(m.el){ m.el.remove(); m.el = null; onScreen--; }
@@ -265,15 +282,39 @@
       m.vis = vis;
     });
 
-    // 發問人數：訂閱全量投稿（不受開頁時間限制），以 table+nick 去重
-    subsRef.on('child_added', snap => {
-      const it = snap.val(); if(!it) return;
-      askerSet.add(String(it.table || '') + '\u0001' + String(it.nick || ''));
-      askerCountEl.textContent = askerSet.size;
-    });
+    // ── 重播補位：佇列空、螢幕未滿時，用全場合格投稿洗牌循環補位 ──
+    // 整池播完一輪才重洗；補位當下重查合格性（被擋的永不重播）；同一條還在幕上時跳過不疊播。
+    let cycle = [];
+    function nextRecycled(){
+      for(let round = 0; round < 2; round++){
+        if(cycle.length === 0){
+          cycle = [...items.keys()];
+          for(let i = cycle.length - 1; i > 0; i--){
+            const j = Math.floor(Math.random() * (i + 1));
+            const t = cycle[i]; cycle[i] = cycle[j]; cycle[j] = t;
+          }
+        }
+        while(cycle.length){
+          const key = cycle.pop();
+          const it = items.get(key);
+          const m = subMap.get(key);
+          if(it && isEligible(it) && !(m && m.el)){
+            return { key, table: it.table, nick: it.nick, question: it.question };
+          }
+        }
+      }
+      return null;   // 池子空或全部在幕上，這輪不補
+    }
+    (function fillLoop(){
+      if(!paused && initialLoaded && queue.length === 0 && onScreen < cfg.maxOnScreen){
+        const it = nextRecycled();
+        if(it) spawn(it);
+      }
+      setTimeout(fillLoop, Math.max(200, Number(cfg.fillMs) || 1200));
+    })();
 
     db.ref('rooms/' + ROOM + '/control/clearAt').on('value', s => {
-      const t = s.val(); if(t && t > startAt) clearScreen();
+      const t = s.val(); if(t && t > pageOpenAt) clearScreen();
     });
   }
 
@@ -285,6 +326,7 @@
     $('f_font').value  = cfg.fontGroups.join(', ');
     $('f_lanes').value = cfg.lanes; $('f_max').value = cfg.maxOnScreen;
     $('f_drip').value = cfg.dripMs;
+    $('f_fill').value = cfg.fillMs;
   }
   function readForm(){
     cfg.speedGroups = parseNums($('f_speed').value);
@@ -293,6 +335,7 @@
     if(lanes !== cfg.lanes){ cfg.lanes = lanes; laneBusyUntil = new Array(lanes).fill(0); }
     cfg.maxOnScreen = parseInt($('f_max').value) || cfg.maxOnScreen;
     cfg.dripMs = parseInt($('f_drip').value) || cfg.dripMs;
+    cfg.fillMs = parseInt($('f_fill').value) || cfg.fillMs;
     localStorage.setItem(LS, JSON.stringify(cfg));
   }
   function setScene(name){
