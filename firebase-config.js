@@ -16,8 +16,8 @@ const firebaseConfig = {
 };
 
 // 房間代號：彩排與正式演出用不同 room，資料互不干擾。
-// 彩排用 qqqqaaaa-rehearsal，演出當天改成 qqqqaaaa-live 再重新整理各頁面。
-const ROOM = "qqqqaaaa-rehearsal";
+// 已於 2026/08/13 切換為正式 room（qqqqaaaa-live）；要回彩排改回 qqqqaaaa-rehearsal。
+const ROOM = "qqqqaaaa-live";
 
 // 各頁共用初始化。設定未填、SDK 沒載到（CDN 掛掉）或初始化失敗時回傳 null，
 // 失敗原因放在 QQQQ_INIT_ERROR，頁面必須顯示明確提示（不可白屏）。
