@@ -177,8 +177,9 @@
     <button type="submit" class="submit-btn" id="submitBtn">送出問題</button>
   </form>
 
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <!-- 投稿頁刻意不載 Firebase SDK：SDK 會佔一條常駐連線，免費方案只有 100 條，
+       觀眾 150 人同時開頁會爆。改用 REST（送出瞬間打一次 HTTP，不佔線），
+       常駐連線留給 screen / draw / admin。順便讓觀眾手機載入更快。 -->
   <script src="firebase-config.js"></script>
   <script>
     (function(){
@@ -266,22 +267,23 @@
         errorMsg.classList.remove('show');
       }
 
-      // ─ Firebase 初始化 ─
-      var db = null;
+      // ─ REST 寫入端點（不用 SDK、不佔常駐連線）─
+      var REST_BASE = null;
       try {
-        db = (typeof initQQQQDb === 'function') ? initQQQQDb() : null;
-      } catch (e) {
-        db = null;
-      }
+        if (typeof firebaseConfig !== 'undefined' &&
+            firebaseConfig.databaseURL && firebaseConfig.databaseURL !== 'PASTE_HERE') {
+          REST_BASE = firebaseConfig.databaseURL.replace(/\/+$/, '');
+        }
+      } catch (e) { REST_BASE = null; }
 
-      if (!db) {
+      if (!REST_BASE) {
         fbWarning.classList.add('show');
         submitBtn.disabled = true;
       }
 
       submitForm.addEventListener('submit', function(ev){
         ev.preventDefault();
-        if (!db) { return; }
+        if (!REST_BASE) { return; }
 
         var table = tableSelect.value.trim();
         var nick = nickInput.value.trim();
@@ -301,11 +303,16 @@
         submitBtn.disabled = true;
         var originalLabel = submitBtn.textContent;
 
-        db.ref('rooms/' + ROOM + '/submissions').push({
-          table: table,
-          nick: nick,
-          question: question,
-          ts: firebase.database.ServerValue.TIMESTAMP
+        fetch(REST_BASE + '/rooms/' + ROOM + '/submissions.json', {
+          method: 'POST',
+          body: JSON.stringify({
+            table: table,
+            nick: nick,
+            question: question,
+            ts: { '.sv': 'timestamp' }   // REST 版的伺服器時間戳寫法
+          })
+        }).then(function(res){
+          if (!res.ok) throw new Error('HTTP ' + res.status);
         }).then(function(){
           questionInput.value = '';
           clampToCodePoints(questionInput, QUESTION_LIMIT, questionCounter);
