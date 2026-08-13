@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QQQQAAAA · 壓力測試</title>
+<style>
+  body{background:#0a0a0a; color:#FFFDF6; font-family:system-ui,"PingFang TC",sans-serif; padding:30px; line-height:1.6; max-width:640px;}
+  h2{margin:0 0 6px;}
+  p{color:#888; margin:0 0 22px; font-size:14px;}
+  .row{margin-bottom:16px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  label{font-size:15px; white-space:nowrap;}
+  input[type=number]{font-size:18px; padding:8px; width:80px; border-radius:8px; border:1px solid #444; background:#111; color:#fff;}
+  input[type=text]{font-size:16px; padding:8px; width:220px; border-radius:8px; border:1px solid #444; background:#111; color:#fff;}
+  input[type=checkbox]{width:18px; height:18px;}
+  button{font-size:20px; font-weight:800; padding:14px 26px; border:none; border-radius:12px; background:#fff; color:#000; cursor:pointer;}
+  button:disabled{opacity:.4; cursor:not-allowed;}
+  #status{margin-top:22px; font-size:16px;}
+  #status b{color:#FFD166;}
+  #status .fail{color:#ff6b6b;}
+  #log{margin-top:14px; font-family:monospace; font-size:13px; color:#6c6; white-space:pre-wrap; max-height:300px; overflow-y:auto;}
+  #err{margin-top:20px; padding:14px 18px; background:#3a1414; border:1px solid #ff6b6b; border-radius:10px; color:#ffb3b3; font-size:14px; display:none;}
+  .hint{color:#666; font-size:12px; margin-top:-8px; margin-bottom:18px;}
+</style>
+</head>
+<body>
+  <h2>QQQQAAAA 壓力測試 🚀</h2>
+  <p>先開好另一個分頁的 <b>screen.html</b>（或 draw.html），再回來這裡灌假資料，觀察彈幕牆佇列消化與抽題池行為順不順。</p>
+
+  <div id="err"></div>
+
+  <div class="row">
+    <label>Room</label><input id="room" type="text">
+  </div>
+  <div class="hint">預設帶入 firebase-config.js 的 ROOM；彩排請務必改成彩排用 room，避免誤灌正式資料。</div>
+
+  <div class="row">
+    <label>每波筆數</label><input id="n" type="number" value="20">
+    <label>波數（每秒一波）</label><input id="waves" type="number" value="10">
+  </div>
+
+  <div class="row">
+    <label><input id="dirty" type="checkbox" checked> 混入約 5% 黑名單詞測試題（測 held 流程）</label>
+  </div>
+
+  <div class="row">
+    <button id="go">灌入</button>
+  </div>
+
+  <div id="status">已送出 <b id="sent">0</b> / <b id="total">0</b> 筆，失敗 <span class="fail" id="failed">0</span> 筆</div>
+  <div id="log"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script>
+  // ── 語料（皆為虛構暱稱與情境題，非真實客戶或員工姓名） ──────────
+  const NICK = ['阿Ben','小美','Cody','阿珍','Lisa','大文','Kai哥','小魚','Mia','阿豪'];
+
+  const QUESTIONS = [
+    '你們誰比較會記帳？',
+    '你們誰比較容易迷路？',
+    '你們誰比較怕蟑螂？',
+    '你們誰做家事比較勤快？',
+    '你們誰比較會看Google地圖？',
+    '你們誰比較常忘記帶鑰匙？',
+    '你們誰比較會殺價？',
+    '你們誰起床比較容易？',
+    '你們誰比較會安慰人？',
+    '你們誰比較敢跟老闆盧？',
+    '你們誰比較會挑餐廳？',
+    '你們誰吵架比較會先道歉？',
+    '你們誰比較會存錢？',
+    '你們誰比較怕打針？',
+    '你們誰比較會修東西？'
+  ];
+
+  // 含黑名單詞「幹」的測試題，用來驗證 held（待放行）流程；不含白名單詞（幹嘛/能幹等）。
+  const DIRTY_QUESTIONS = [
+    '你們誰比較敢跟老闆對幹？',
+    '誰比較會幹壞事？',
+    '你們誰做事比較會亂幹？',
+    '你們誰比較常說幹這個字？',
+    '誰吵架比較容易罵幹？'
+  ];
+
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  const randTable = () => 'B' + (3 + Math.floor(Math.random() * 28)); // B3–B30
+
+  function makeItem(withDirty){
+    const useDirty = withDirty && Math.random() < 0.05;
+    return {
+      table: randTable(),
+      nick: pick(NICK),
+      question: useDirty ? pick(DIRTY_QUESTIONS) : pick(QUESTIONS)
+    };
+  }
+
+  // ── 初始化 ─────────────────────────────────────────────
+  const errBox = document.getElementById('err');
+  const goBtn = document.getElementById('go');
+  const roomInput = document.getElementById('room');
+  const logEl = document.getElementById('log');
+  const sentEl = document.getElementById('sent');
+  const totalEl = document.getElementById('total');
+  const failedEl = document.getElementById('failed');
+
+  const log = m => { logEl.textContent += m + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+
+  const db = (typeof initQQQQDb === 'function') ? initQQQQDb() : null;
+
+  if (!db) {
+    errBox.style.display = 'block';
+    errBox.textContent = '⚠️ Firebase 尚未設定完成：firebase-config.js 裡的 firebaseConfig 還是預留值（PASTE_HERE），或初始化失敗。請先依 deploy-guide.md 填好設定再重新整理此頁。';
+    goBtn.disabled = true;
+  } else {
+    roomInput.value = (typeof ROOM !== 'undefined' && ROOM) ? ROOM : '';
+  }
+
+  goBtn.onclick = async () => {
+    if (!db) return;
+    const room = (roomInput.value || '').trim();
+    if (!room) { alert('room 不能是空的'); return; }
+
+    const subsRef = db.ref('rooms/' + room + '/submissions');
+    const n = Math.max(1, +document.getElementById('n').value || 20);
+    const waves = Math.max(1, +document.getElementById('waves').value || 10);
+    const withDirty = document.getElementById('dirty').checked;
+    const total = n * waves;
+
+    goBtn.disabled = true;
+    sentEl.textContent = '0';
+    totalEl.textContent = String(total);
+    failedEl.textContent = '0';
+    logEl.textContent = '';
+
+    let sent = 0, failed = 0;
+    log(`灌入目標 room=${room}，共 ${waves} 波、每波 ${n} 筆（總計 ${total} 筆）`);
+
+    for (let w = 0; w < waves; w++) {
+      const t0 = performance.now();
+      const ps = [];
+      for (let i = 0; i < n; i++) {
+        const item = makeItem(withDirty);
+        ps.push(
+          subsRef.push({
+            table: item.table,
+            nick: item.nick,
+            question: item.question,
+            ts: firebase.database.ServerValue.TIMESTAMP
+          }).then(() => { sent++; sentEl.textContent = String(sent); })
+            .catch(e => { failed++; failedEl.textContent = String(failed); log('  ✗ 失敗：' + (e && e.message ? e.message : e)); })
+        );
+      }
+      await Promise.allSettled(ps);
+      log(`第 ${w + 1}/${waves} 波送出完成，耗時 ${Math.round(performance.now() - t0)}ms（累計送出 ${sent}，失敗 ${failed}）`);
+      if (w < waves - 1) await new Promise(r => setTimeout(r, 1000));
+    }
+
+    log(failed > 0 ? `全部完成，但有 ${failed} 筆失敗 ⚠️` : '全部完成 ✅');
+    goBtn.disabled = false;
+  };
+  </script>
+</body>
+</html>

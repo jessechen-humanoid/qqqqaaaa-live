@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QQQQAAAA · 抽題台</title>
+<style>
+  :root{
+    --bg:#0a0a0a;
+    --ivory:#FFFDF6;
+    --yellow:#FFD166;
+    --font-scale:1;
+    --q-fit:1; /* 複驗回歸D：只縮 #question 自己的比例，不影響控制台的全域字級縮放 */
+  }
+  *{box-sizing:border-box;}
+  /* 鎖死頁面捲動（現場容易被誤捲）；投影對位改用 ↑↓ 方向鍵微調 --yoff（與 screen 一致） */
+  html,body{margin:0; background:var(--bg); color:var(--ivory); overflow:hidden; height:100vh;
+    font-family:system-ui,-apple-system,"Segoe UI","PingFang TC","Microsoft JhengHei",sans-serif;}
+
+  #spacerTop{height:12vh;}
+
+  #stage{display:flex; flex-direction:column; align-items:center; text-align:center; padding:0 4vw;
+    transform:translateY(var(--yoff, 0vh));}
+
+  #standby{color:#151515; font-size:min(3.4vw,4.6vh); font-weight:700; letter-spacing:.04em; padding:2vh 0;}
+
+  #content{display:flex; flex-direction:column; align-items:center;}
+  #content[hidden]{display:none;}
+
+  /* 複驗回歸D：拿掉 line-clamp 硬裁切（會切半句、無省略號）。改由 JS 在落定時量測，
+     超過兩行高就逐步縮小 --q-fit 直到兩行內或到下限，overflow:hidden 只當最後一道保險。 */
+  #question{
+    font-size:calc(min(6.5vw,11vh) * var(--font-scale) * var(--q-fit));
+    font-weight:800; line-height:1.5; color:var(--ivory);
+    max-width:88vw; overflow-wrap:break-word; overflow:hidden;
+  }
+  #content.shuffling #question{filter:blur(1.5px); opacity:.7;}
+
+  #divider{width:52px; height:2px; margin:2.6vh 0; background:rgba(255,209,102,.45); border-radius:2px;}
+
+  #toneRow{
+    display:flex; align-items:center; justify-content:center; gap:22px; flex-wrap:wrap;
+    font-size:calc(min(6.5vw,11vh) * 0.75 * var(--font-scale));
+    color:var(--yellow); font-weight:700;
+  }
+  #content.shuffling #toneRow{opacity:.7;}
+  #toneText{display:flex; align-items:center; gap:.35em; white-space:nowrap;}
+  #toneBox{
+    display:inline-flex; align-items:center; justify-content:center;
+    width:1.4em; height:1.4em; border-radius:.22em; background:var(--yellow);
+  }
+  #toneNum{font-size:1.2em; color:#0a0a0a; font-weight:900; line-height:1;}
+  #pill{
+    font-size:.55em; font-weight:600; color:rgba(255,250,235,.6);
+    border:1px solid rgba(255,250,235,.28); border-radius:999px;
+    padding:.55em 1.1em; white-space:nowrap;
+  }
+
+  #content.settled{animation:settleIn .28s ease-out;}
+  @keyframes settleIn{ from{opacity:0; transform:scale(.96);} to{opacity:1; transform:scale(1);} }
+
+  #emptyState{font-size:min(7vw,10vh); font-weight:900; color:var(--ivory); padding:4vh 0;}
+  #emptyState[hidden]{display:none;}
+
+  #errorState{
+    display:none; max-width:70vw; margin:4vh auto; padding:2vh 3vw; border-radius:10px;
+    border:1px solid rgba(255,209,102,.5); color:var(--yellow); font-size:min(3.2vw,3vh);
+    line-height:1.6; text-align:center;
+  }
+  #errorState.show{display:block;}
+
+  /* 下方留白：至少 120vh，讓操作者用滾輪把內容喬到投影最佳高度 */
+  #spacerBottom{height:120vh;}
+
+  #standbyHint{position:fixed; left:10px; bottom:8px; color:#161616; font-size:11px; font-family:monospace; z-index:5;}
+  #stat{position:fixed; left:10px; bottom:26px; color:#333; font-size:11px; font-family:monospace; z-index:5;}
+
+  #drawBtn,#fsBtn,#cogBtn{position:fixed; bottom:12px; z-index:50; background:#111; color:#777;
+    border:1px solid #2a2a2a; border-radius:8px; padding:8px 12px; font-size:13px; cursor:pointer;
+    transition:opacity .4s ease;}
+  #drawBtn{right:226px;} #cogBtn{right:120px;} #fsBtn{right:14px;}
+  body.opctrl-hidden #drawBtn,body.opctrl-hidden #fsBtn,body.opctrl-hidden #cogBtn{opacity:0; pointer-events:none;}
+
+  /* 複驗回歸C：改成與 #stat 同級的暗色小字，放左下角，觀眾不會注意，但操作者持續看得到（不吃 opctrl-hidden） */
+  #pendingWarn{position:fixed; left:10px; bottom:44px; color:#7a6a2e; font-size:11px; font-family:monospace;
+    z-index:5; display:none;}
+  #pendingWarn.show{display:block;}
+
+  #panel{position:fixed; right:14px; bottom:50px; width:320px; max-height:82vh; overflow:auto; z-index:60;
+    background:#111; border:1px solid #2a2a2a; border-radius:14px; padding:16px 16px 18px; display:none; color:#ddd;}
+  #panel.open{display:block;}
+  #panel h3{margin:2px 0 10px; font-size:15px; color:#fff;}
+  #panel label{display:block; font-size:12px; color:#9aa; margin:12px 0 4px;}
+  #panel input{width:100%; font-size:14px; padding:8px 10px; border-radius:8px; border:1px solid #333; background:#000; color:#fff;}
+  #panel .acts{display:flex; gap:8px; margin-top:16px;}
+  #panel .acts button{flex:1; font-size:14px; font-weight:800; padding:10px 0; border:none; border-radius:8px; cursor:pointer;}
+  #saveBtn{background:#fff; color:#000;} #resetBtn{background:#000; color:#888; border:1px solid #333 !important;}
+  #panel .keys{font-size:11px; color:#666; margin-top:14px; line-height:1.6;}
+</style>
+</head>
+<body>
+  <div id="spacerTop"></div>
+
+  <div id="stage">
+    <div id="standby">空白鍵抽題後這裡會顯示題目</div>
+    <div id="content" hidden>
+      <div id="question"></div>
+      <div id="divider"></div>
+      <div id="toneRow">
+        <div id="toneText">請全用 <span id="toneBox"><span id="toneNum">1</span></span> 聲回答</div>
+        <div id="pill"></div>
+      </div>
+    </div>
+    <div id="emptyState" hidden>題目已抽完</div>
+    <div id="errorState"></div>
+  </div>
+
+  <div id="spacerBottom"></div>
+
+  <div id="standbyHint">空白鍵＝抽題</div>
+  <div id="stat"></div>
+  <div id="pendingWarn"></div>
+
+  <button id="drawBtn">抽題（空白鍵）</button>
+  <button id="cogBtn">⚙ 控制台 (C)</button>
+  <button id="fsBtn">⛶ 全螢幕 (F)</button>
+
+  <div id="panel">
+    <h3>控制台</h3>
+    <label>字級縮放（0.6 ~ 1.6）</label>
+    <input id="f_fontScale" type="number" step="0.05" min="0.6" max="1.6">
+    <label>洗牌動畫時長（ms）</label>
+    <input id="f_shuffleMs" type="number" step="50" min="200" max="2000">
+    <div class="acts">
+      <button id="saveBtn">儲存到這台電腦</button>
+      <button id="resetBtn">重設預設</button>
+    </div>
+    <div class="keys">空白鍵 抽題 · F 全螢幕 · C 控制台</div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="blocklist.js"></script>
+  <script>
+  'use strict';
+
+  // ============================================================
+  // === PURE FUNCTIONS START（純函式：不碰 DOM／Firebase，可在 Node 直接測試）===
+  // ============================================================
+
+  // 從池中均勻隨機抽一題。pool: 陣列；rng: 0~1 隨機數產生器（預設 Math.random，測試時可注入）。
+  function pickQuestion(pool, rng){
+    rng = rng || Math.random;
+    if(!pool || pool.length === 0) return null;
+    return pool[Math.floor(rng() * pool.length)];
+  }
+
+  // 從 1~4 中均勻隨機抽一個聲調，排除上一個聲調（lastTone）；沒有 lastTone 時四者等機率。
+  function pickTone(lastTone, rng){
+    rng = rng || Math.random;
+    var all = [1, 2, 3, 4];
+    var candidates = (lastTone && all.indexOf(lastTone) >= 0) ? all.filter(function(t){ return t !== lastTone; }) : all;
+    return candidates[Math.floor(rng() * candidates.length)];
+  }
+
+  // 建立抽題池：ts <= cutoffAt（cutoffAt 為 null 代表尚未鎖定，不篩選）、eligibleFn 判定合格、
+  // 沒有 drawnAt、且不在本機 drawnSet（斷網時本機已抽過但尚未寫回也要排除，避免重複）。
+  function buildPool(submissions, cutoffAt, drawnSet, eligibleFn){
+    drawnSet = drawnSet || new Set();
+    eligibleFn = eligibleFn || function(){ return true; };
+    return (submissions || []).filter(function(it){
+      if(!it || it.drawnAt) return false;
+      if(cutoffAt != null && !(it.ts <= cutoffAt)) return false;
+      if(drawnSet.has(it.id)) return false;
+      return !!eligibleFn(it);
+    });
+  }
+
+  // 讓 node --check / node 直接 require 這段做驗證用；瀏覽器內 module 不存在，這段不會執行。
+  if(typeof module !== 'undefined' && module.exports){
+    module.exports = { pickQuestion: pickQuestion, pickTone: pickTone, buildPool: buildPool };
+  }
+  // ============================================================
+  // === PURE FUNCTIONS END ===
+  // ============================================================
+
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c]; }); }
+
+  /* ===== 控制台設定（localStorage）===== */
+  var LS_KEY = 'qqqq_draw_cfg_v1';
+  var DEFAULT_CFG = { fontScale: 1, shuffleMs: 600 };
+  function loadCfg(){
+    try{ return Object.assign({}, DEFAULT_CFG, JSON.parse(localStorage.getItem(LS_KEY) || '{}')); }
+    catch(e){ return Object.assign({}, DEFAULT_CFG); }
+  }
+  var cfg = loadCfg();
+  function applyCfg(){
+    document.documentElement.style.setProperty('--font-scale', cfg.fontScale);
+    // 題目顯示中調整字級時重新量測兩行縮放，避免溢出成三行或殘留舊比例
+    var cEl = document.getElementById('content');
+    if(cEl && !cEl.hidden) fitQuestionToTwoLines();
+  }
+  applyCfg();
+
+  /* ===== DOM 參照 ===== */
+  var $ = function(id){ return document.getElementById(id); };
+  var standbyEl = $('standby'), contentEl = $('content'), emptyEl = $('emptyState'), errorEl = $('errorState');
+  var questionEl = $('question'), toneNumEl = $('toneNum'), pillEl = $('pill');
+  var statEl = $('stat'), panel = $('panel'), pendingWarnEl = $('pendingWarn');
+
+  // 複驗回歸A：showError 可關閉（僅 Esc，避免空白鍵清框誤抽）；非 init 類錯誤（persistent 未傳/false）5 秒自動淡出，
+  // init 類（persistent=true）不自動淡出，但仍可手動關閉。
+  var errorAutoHideTimer = null;
+  function showError(msg, persistent){
+    errorEl.textContent = msg;
+    errorEl.classList.add('show');
+    standbyEl.hidden = true;
+    clearTimeout(errorAutoHideTimer);
+    if(!persistent){
+      errorAutoHideTimer = setTimeout(function(){ errorEl.classList.remove('show'); }, 5000);
+    }
+  }
+  function hideErrorBox(){
+    clearTimeout(errorAutoHideTimer);
+    errorEl.classList.remove('show');
+  }
+
+  // 問題1：任何未捕捉例外／rejection 都要在畫面留下明確提示，不可讓頁面停在待機狀態卻無聲無息。
+  // 複驗回歸A：這類屬於暫時性例外（非 init 致命），不傳 persistent，5 秒後自動淡出。
+  addEventListener('error', function(ev){
+    try{ showError('⚠ 頁面發生例外：' + (ev && ev.message ? ev.message : '未知錯誤') + '，請重新整理本頁。'); }catch(_e){}
+  });
+  addEventListener('unhandledrejection', function(ev){
+    try{
+      var m = ev && ev.reason && ev.reason.message ? ev.reason.message : String(ev && ev.reason);
+      showError('⚠ 頁面發生例外：' + m + '，請重新整理本頁。');
+    }catch(_e){}
+  });
+
+  /* ===== Firebase 初始化 ===== */
+  // 問題1：db 為 null 時顯示 QQQQ_INIT_ERROR 全文；init 段自身也用 try/catch 包，任何拋錯都要有畫面提示。
+  // 這裡是致命的 init 類錯誤（db 真的無法用），傳 persistent=true 不自動淡出。
+  var db = null;
+  try{
+    db = initQQQQDb();
+    if(!db){
+      showError('⚠ ' + (typeof QQQQ_INIT_ERROR === 'string' && QQQQ_INIT_ERROR ? QQQQ_INIT_ERROR : 'Firebase 初始化失敗，請重新整理本頁。'), true);
+    }
+  }catch(e){
+    db = null;
+    showError('⚠ ' + (typeof QQQQ_INIT_ERROR === 'string' && QQQQ_INIT_ERROR ? QQQQ_INIT_ERROR : ('Firebase 初始化例外：' + (e && e.message))), true);
+  }
+
+  var submissionsById = new Map();  // id -> {id, table, nick, question, ts, status, drawnAt, tone}
+  var drawnSet = new Set();          // 本機已抽過的 id（含尚未寫回成功的），防止斷網時重複抽
+  var pendingWrites = [];            // 斷網時排隊的多路徑寫入，重連後補送
+  var pendingSince = null;           // pendingWrites 連續非空的起始時間（問題9）
+  var cutoffAt = null;               // 本機快取的 control/drawCutoffAt
+  var lastTone = null;               // 本機快取的 control/lastTone
+  var lastLocalDrawAt = 0;           // 最近一次本機抽題時間，防止晚到的舊 lastTone 蓋回本機值
+  var isOnline = true;               // 樂觀預設，等 .info/connected 第一次事件校正
+  var isDrawing = false;             // 防止洗牌動畫進行中重複觸發
+  var serverTimeOffset = 0;          // .info/serverTimeOffset：Date.now()+此值＝伺服器時間估計（問題7）
+  var subsReady = false, toneReady = false; // ready gate（問題3/5）：兩者皆完成前不允許真正抽題
+
+  var roomRef, subsRef, cutoffRef, lastToneRef;
+  if(db){
+    try{
+      roomRef = db.ref('rooms/' + ROOM);
+      subsRef = roomRef.child('submissions');
+      cutoffRef = roomRef.child('control/drawCutoffAt');
+      lastToneRef = roomRef.child('control/lastTone');
+
+      subsRef.on('child_added', function(snap){
+        var v = snap.val(); if(!v) return;
+        v.id = snap.key; submissionsById.set(snap.key, v);
+      });
+      subsRef.on('child_changed', function(snap){
+        var v = snap.val(); if(!v) return;
+        v.id = snap.key; submissionsById.set(snap.key, v);
+      });
+      subsRef.on('child_removed', function(snap){ submissionsById.delete(snap.key); });
+      subsRef.once('value').then(function(){ subsReady = true; }).catch(function(){ subsReady = true; });
+      // 複驗回歸B：重整時剛好斷網，once('value')／on('value') 可能永遠不回來，3 秒後強制開閘，
+      // 讓操作者能用已快取（可能是空的）資料繼續抽，不會卡死在「載入中…」。
+      setTimeout(function(){ subsReady = true; toneReady = true; }, 3000);
+
+      // 問題6：cutoff 監聽允許 null（admin 重設截止 remove 後，下次抽題要重新鎖定，不可被過濾掉）。
+      cutoffRef.on('value', function(snap){ cutoffAt = snap.val(); });
+      lastToneRef.on('value', function(snap){
+        toneReady = true; // 問題3/5：第一次 value 事件（即使值是 null）就代表 lastTone 已同步完成
+        // 斷網期間本機已抽過時，重連後晚到的舊 lastTone 不可蓋回本機值，
+        // 否則下一抽可能與剛抽的那題同聲調（近 10 秒抽過或還有補寫佇列都先信本機）。
+        if(Date.now() - lastLocalDrawAt < 10000 || pendingWrites.length) return;
+        var v = snap.val();
+        if(v != null) lastTone = Number(v); // 問題10：比對前轉成 Number，避免字串型別造成 indexOf 失準
+      });
+
+      db.ref('.info/connected').on('value', function(snap){
+        var wasOffline = !isOnline;
+        isOnline = snap.val() === true;
+        if(isOnline && wasOffline) flushPending();
+      });
+
+      // 問題7：訂閱伺服器時間偏移，cutoff 的寫入與逾時 fallback 都用 Date.now()+offset 估計伺服器時間。
+      db.ref('.info/serverTimeOffset').on('value', function(snap){
+        var v = snap.val();
+        serverTimeOffset = (typeof v === 'number') ? v : 0;
+      });
+    }catch(e){
+      db = null;
+      showError('⚠ Firebase 連線設定失敗：' + (e && e.message) + '，請重新整理本頁。', true);
+    }
+  }
+
+  function serverNow(){ return Date.now() + serverTimeOffset; }
+
+  function currentPool(){
+    return buildPool(Array.from(submissionsById.values()), cutoffAt, drawnSet, isEligible);
+  }
+
+  // 首次抽題時鎖定 drawCutoffAt。
+  // 注意：transaction 的更新函式必須是可重跑的「純值」，不支援 firebase.database.ServerValue.TIMESTAMP
+  // 這種 sentinel 物件（會被原封不動寫進去而不是換算成時間），所以這裡改用估計的伺服器時間 serverNow()。
+  // 問題2：離線或連線異常時 transaction 可能永遠不 resolve，用 Promise.race 加 1.5 秒逾時，逾時就在本機
+  // 先鎖定 cutoff，不讓演出卡死；問題4：transaction resolve 後不看 result.committed（abort 時
+  // committed 為 false 但 snapshot 仍帶回現值），一律看 snapshot 是否存在。
+  var ENSURE_CUTOFF_TIMEOUT_MS = 1500;
+  function ensureCutoff(){
+    if(cutoffAt != null) return Promise.resolve(cutoffAt);
+    if(!cutoffRef){ cutoffAt = serverNow(); return Promise.resolve(cutoffAt); }
+
+    var txPromise = cutoffRef.transaction(function(current){
+      return (current == null) ? serverNow() : undefined; // 已存在就不覆寫（abort）
+    }).then(function(result){
+      var v = result && result.snapshot ? result.snapshot.val() : null; // 問題4：不看 committed，只看 snapshot
+      if(v != null) cutoffAt = v;
+      return cutoffAt;
+    }).catch(function(){
+      return cutoffAt; // 交易失敗時不覆寫，讓逾時分支或之後的 value 監聽決定
+    });
+
+    var timeoutPromise = new Promise(function(resolve){
+      setTimeout(function(){ resolve('TIMEOUT'); }, ENSURE_CUTOFF_TIMEOUT_MS);
+    });
+
+    return Promise.race([txPromise, timeoutPromise]).then(function(result){
+      if(result === 'TIMEOUT' && cutoffAt == null){
+        cutoffAt = serverNow(); // 離線兜底：transaction 逾時未回應，先在本機鎖定不讓演出卡死
+      }
+      return cutoffAt;
+    });
+  }
+
+  function setReveal(item, tone){
+    questionEl.innerHTML = esc(item.question);
+    toneNumEl.textContent = String(tone);
+    pillEl.innerHTML = '來自 ' + esc(item.table) + ' ' + esc(item.nick);
+  }
+
+  // 複驗回歸D：不做硬裁切，落定時量測一次。超過兩行高就逐步縮小 --q-fit（每次 -5%），
+  // 直到量到兩行內或觸底（1 的 0.55 倍）為止。終止條件：
+  //   (a) scrollHeight 已在兩行高＋10% 容差內 → break
+  //   (b) 量不到 lineHeight（非有限正數）→ break，不硬縮
+  //   (c) fit 已在觸底前一步就會被鎖到下限，下一輪偵測到「已在下限」直接 break
+  //   (d) guard 次數上限（40）作為保底，理論上 9~10 輪內就會命中 (a)/(c)，不會無窮迴圈。
+  function fitQuestionToTwoLines(){
+    document.documentElement.style.setProperty('--q-fit', 1);
+    var fit = 1;
+    var floor = 0.55;
+    var guard = 0, maxGuard = 40;
+    var qEl = document.getElementById('question'); // 不依賴模組層 questionEl 的賦值順序
+    if(!qEl) return;
+    while(guard < maxGuard){
+      var cs = getComputedStyle(qEl);
+      var lh = parseFloat(cs.lineHeight);
+      if(!isFinite(lh) || lh < 4) break; // 行高量不到或單位異常（無單位 line-height 可能回 "1.5"）就放棄，不硬縮；此字級真實行高必遠大於 4px
+      var limit = lh * 2 * 1.1; // 兩行高 + 10% 容差
+      if(qEl.scrollHeight <= limit) break; // 已在兩行內
+      if(fit <= floor) break; // 已到下限，不再往下縮
+      fit = Math.max(floor, fit - 0.05);
+      document.documentElement.style.setProperty('--q-fit', fit);
+      guard++;
+    }
+  }
+
+  function showEmptyState(){
+    standbyEl.hidden = true;
+    contentEl.hidden = true;
+    emptyEl.textContent = '題目已抽完';
+    emptyEl.hidden = false;
+  }
+
+  // 問題3/5：ready gate 未完成前按抽題要顯示「載入中…」，不能誤報「題目已抽完」。
+  function showLoadingState(){
+    standbyEl.hidden = true;
+    contentEl.hidden = true;
+    emptyEl.textContent = '載入中…';
+    emptyEl.hidden = false;
+  }
+
+  // 揭曉動態：~cfg.shuffleMs 毫秒的洗牌（題目快速閃替、聲調數字快速輪替），結束後同時落定。
+  function playShuffleAnimation(pool, finalItem, finalTone){
+    return new Promise(function(resolve){
+      standbyEl.hidden = true;
+      emptyEl.hidden = true;
+      contentEl.hidden = false;
+      contentEl.classList.remove('settled');
+      contentEl.classList.add('shuffling');
+      pillEl.innerHTML = '';
+      document.documentElement.style.setProperty('--q-fit', 1); // 新一輪先還原，避免延用上一題的縮小比例
+
+      var decoys = pool.filter(function(p){ return p.id !== finalItem.id; });
+      if(decoys.length === 0) decoys = [finalItem];
+
+      // 分頁不可見（被切到背景、螢幕休眠）時計時器被瀏覽器深度節流，動畫毫無意義
+      // 還會拖住 isDrawing——直接同步落定，避免抽題鍵變死鍵。
+      if(document.hidden){
+        setReveal(finalItem, finalTone);
+        fitQuestionToTwoLines();
+        contentEl.classList.remove('shuffling');
+        contentEl.classList.add('settled');
+        resolve();
+        return;
+      }
+
+      var shuffleMs = Math.max(200, Number(cfg.shuffleMs) || 600);
+      var stepMs = 60;
+      // 用牆上時鐘計時，不用步數累加：分頁被切到背景時瀏覽器會把計時器節流到
+      // 每秒甚至每分鐘一跳，累加式會讓 isDrawing 卡住幾分鐘、抽題鍵變死鍵。
+      var startAt = Date.now();
+
+      var timer = setInterval(function(){
+        var decoy = decoys[Math.floor(Math.random() * decoys.length)];
+        questionEl.innerHTML = esc(decoy.question);
+        toneNumEl.textContent = String(1 + Math.floor(Math.random() * 4));
+        if(Date.now() - startAt >= shuffleMs){
+          clearInterval(timer);
+          setReveal(finalItem, finalTone);
+          fitQuestionToTwoLines(); // 複驗回歸D：洗牌閃替期間不量測，落定這一刻才做一次
+          contentEl.classList.remove('shuffling');
+          contentEl.classList.add('settled');
+          resolve();
+        }
+      }, stepMs);
+    });
+  }
+
+  function persistDraw(id, tone){
+    var updates = {};
+    updates['submissions/' + id + '/drawnAt'] = firebase.database.ServerValue.TIMESTAMP;
+    updates['submissions/' + id + '/tone'] = tone;
+    updates['control/lastTone'] = tone;
+    queueOrSend({ updates: updates });
+  }
+  function queueOrSend(item){
+    if(!isOnline || !roomRef){ pendingWrites.push(item); return; }
+    roomRef.update(item.updates).catch(function(){ pendingWrites.push(item); });
+  }
+  function flushPending(){
+    if(!pendingWrites.length) return;
+    // 補寫還在飛時，server 回傳的仍是斷網前的舊 lastTone，重新武裝防蓋回窗口
+    lastLocalDrawAt = Date.now();
+    var queued = pendingWrites.splice(0);
+    queued.forEach(queueOrSend);
+  }
+
+  function draw(){
+    if(isDrawing) return;
+    if(!db){ showError('⚠ Firebase 未設定，無法抽題。'); return; }
+    // 問題3/5：ready gate——submissions 首批資料與 lastTone 首次同步都完成前，先顯示載入中，不真的抽題。
+    if(!(subsReady && toneReady)){ showLoadingState(); return; }
+    isDrawing = true;
+    ensureCutoff().then(function(){
+      var pool = currentPool();
+      if(pool.length === 0){ showEmptyState(); return; }
+      var chosen = pickQuestion(pool);
+      var tone = pickTone(Number(lastTone) || null); // 問題10：Number() 後才比對，防字串型別
+      drawnSet.add(chosen.id);   // 樂觀排除，斷網時也不會被再抽到
+      return playShuffleAnimation(pool, chosen, tone).then(function(){
+        lastTone = tone;         // 立刻更新本機快取，離線時下一抽仍能遵守「不與上次相同」
+        lastLocalDrawAt = Date.now();
+        persistDraw(chosen.id, tone);
+      });
+    }).catch(function(){
+      showError('⚠ 抽題發生例外，請重新整理本頁後再試。');
+    }).finally(function(){
+      isDrawing = false; // 問題2：不論成功、失敗、pool 為空，都保證用 finally 復位，不會卡死抽題鍵
+    });
+  }
+
+  /* ===== 控制台 ===== */
+  function fillForm(){
+    $('f_fontScale').value = cfg.fontScale;
+    $('f_shuffleMs').value = cfg.shuffleMs;
+  }
+  function clamp(n, lo, hi){ return Math.min(hi, Math.max(lo, n)); }
+  function readForm(){
+    var fs = parseFloat($('f_fontScale').value);
+    var sm = parseInt($('f_shuffleMs').value, 10);
+    cfg.fontScale = (isFinite(fs) && fs > 0) ? clamp(fs, 0.6, 1.6) : cfg.fontScale; // 問題10：clamp 到 0.6~1.6
+    cfg.shuffleMs = (isFinite(sm) && sm > 0) ? sm : cfg.shuffleMs;
+    localStorage.setItem(LS_KEY, JSON.stringify(cfg));
+    applyCfg();
+  }
+  function togglePanel(){ panel.classList.toggle('open'); if(panel.classList.contains('open')) fillForm(); }
+  $('cogBtn').onclick = togglePanel;
+  $('saveBtn').onclick = function(){ readForm(); panel.classList.remove('open'); };
+  $('resetBtn').onclick = function(){
+    cfg = Object.assign({}, DEFAULT_CFG);
+    localStorage.setItem(LS_KEY, JSON.stringify(cfg));
+    applyCfg(); fillForm();
+  };
+  $('drawBtn').onclick = draw;
+
+  /* ===== 全螢幕 + 快捷鍵 ===== */
+  var fsBtn = $('fsBtn');
+  if(!document.documentElement.requestFullscreen) fsBtn.style.display = 'none';
+  // 複驗回歸A：快速連按 F 或轉場中呼叫會 reject，接 .catch(function(){}) 吞掉，
+  // 不讓它變成 unhandledrejection 被兜底捕捉、在投影幕畫出永久黃框。
+  function toggleFs(){
+    if(document.fullscreenElement){ document.exitFullscreen().catch(function(){}); }
+    else { document.documentElement.requestFullscreen().catch(function(){}); }
+  }
+  fsBtn.onclick = toggleFs;
+
+  /* 問題8：操作者按鈕（右下角）進入全螢幕後或閒置 3 秒自動淡出，滑鼠移動重現 */
+  var opctrlIdleTimer = null;
+  function showOpCtrl(){ document.body.classList.remove('opctrl-hidden'); }
+  function hideOpCtrl(){ document.body.classList.add('opctrl-hidden'); }
+  function scheduleOpCtrlHide(){
+    clearTimeout(opctrlIdleTimer);
+    opctrlIdleTimer = setTimeout(hideOpCtrl, 3000);
+  }
+  addEventListener('mousemove', function(){ showOpCtrl(); scheduleOpCtrlHide(); });
+  document.addEventListener('fullscreenchange', function(){
+    if(document.fullscreenElement){ hideOpCtrl(); }
+    else { showOpCtrl(); scheduleOpCtrlHide(); }
+  });
+  scheduleOpCtrlHide();
+
+  // 投影對位：↑↓ 微調 1vh（按住可連續）、Shift+↑↓ 一次 5vh、0 歸位，存 localStorage
+  var yOffVh = Number(localStorage.getItem('qqqqaaaa_draw_yoff') || 0);
+  function applyYOff(){
+    yOffVh = Math.max(-60, Math.min(60, yOffVh));
+    document.documentElement.style.setProperty('--yoff', yOffVh + 'vh');
+    localStorage.setItem('qqqqaaaa_draw_yoff', yOffVh);
+  }
+  applyYOff();
+
+  addEventListener('keydown', function(e){
+    if(e.target && e.target.matches && e.target.matches('input,textarea,select')) return;
+    if(e.key === ' ') e.preventDefault();   // 一律擋掉預設捲動，即使按住不放也不能讓畫面滾走
+    var isUp = e.key === 'ArrowUp' || e.key === 'Up';       // 'Up'/'Down' 為舊式命名，一併支援
+    var isDown = e.key === 'ArrowDown' || e.key === 'Down';
+    if(isUp || isDown){   // 對位鍵允許按住連發
+      e.preventDefault();
+      yOffVh += (isUp ? -1 : 1) * (e.shiftKey ? 5 : 1);
+      applyYOff();
+      return;
+    }
+    if(e.key === '0' && !e.repeat){ yOffVh = 0; applyYOff(); return; }
+    if(e.repeat) return;                     // 按住不放只觸發一次
+    // 只有 Esc 能手動關錯誤框（非 init 錯誤 5 秒也會自動淡出）。
+    // 不做「任意鍵關框」：操作者若用空白鍵清框，會在同一次按鍵誤抽掉一題，現場救不回來。
+    if(e.key === 'Escape'){ hideErrorBox(); return; }
+    var k = e.key.toLowerCase();
+    if(e.key === ' ') draw();
+    else if(k === 'f') toggleFs();
+    else if(k === 'c') togglePanel();
+  });
+
+  setInterval(function(){
+    var poolSize = db ? currentPool().length : 0;
+    statEl.textContent = '池 ' + poolSize + ' · 已抽 ' + drawnSet.size +
+      (isOnline ? '' : ' · 離線') + (pendingWrites.length ? (' · 待補寫 ' + pendingWrites.length) : '');
+
+    // 問題9：pendingWrites 連續超過 5 秒非空才示警（避免短暫閃現），恢復後立即消失。
+    if(pendingWrites.length){
+      if(pendingSince == null) pendingSince = Date.now();
+    } else {
+      pendingSince = null;
+    }
+    if(pendingSince != null && (Date.now() - pendingSince >= 5000)){
+      pendingWarnEl.textContent = '⚠ 寫回失敗 ' + pendingWrites.length + ' 筆，重整前勿關閉';
+      pendingWarnEl.classList.add('show');
+    } else {
+      pendingWarnEl.classList.remove('show');
+    }
+  }, 500);
+  </script>
+</body>
+</html>

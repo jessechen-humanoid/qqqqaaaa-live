@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QQQQAAAA · 後台審核</title>
+<style>
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{margin:0; background:#0a0a0a; color:#FFFDF6; min-height:100vh; padding-bottom:48px;
+    font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;}
+
+  header{position:sticky; top:0; background:#0a0a0a; border-bottom:1px solid #222; padding:14px 16px 12px; z-index:10;}
+  h1{font-size:17px; margin:0 0 10px;}
+  h1 .room{color:#888; font-weight:400; font-size:13px;}
+
+  .ctrl{display:flex; flex-direction:column; gap:8px; margin-bottom:12px;}
+  .cutoff{display:flex; align-items:center; justify-content:space-between; gap:10px;
+    background:#141414; border:1px solid #262626; border-radius:10px; padding:10px 12px; font-size:13px;}
+  .cutoff .lbl{color:#aaa;}
+  .cutoff .val{font-weight:700;}
+  .cutoff .val.locked{color:#FFD166;}
+  .cutoff .val.open{color:#5fe3a1;}
+
+  button{font-family:inherit;}
+  .btnrow{display:flex; gap:8px;}
+  .ghost{flex:1; padding:12px 0; border-radius:9px; border:1px solid #3a3a3a; background:#141414; color:#FFFDF6;
+    font-weight:700; font-size:14px; cursor:pointer;}
+  .danger{flex:1; padding:12px 0; border-radius:9px; border:1px solid #e0433f; background:#1a0d0d; color:#ff7b78;
+    font-weight:800; font-size:14px; cursor:pointer;}
+
+  .tabs{display:flex; gap:8px; margin-top:12px;}
+  .tabs button{flex:1; font-size:14px; font-weight:700; padding:11px 0; border-radius:9px; border:1px solid #2a2a2a;
+    background:#141414; color:#bbb; cursor:pointer;}
+  .tabs button.on{background:#FFFDF6; color:#0a0a0a; border-color:#FFFDF6;}
+  .tabs .badge{display:inline-block; min-width:20px; padding:0 6px; margin-left:4px; border-radius:10px;
+    background:#e0433f; color:#fff; font-size:12px;}
+
+  #notice{margin:20px 16px; padding:16px; border:1px solid #e0433f; background:#1a0d0d; color:#ff9d9a;
+    border-radius:10px; font-size:14px; line-height:1.6;}
+
+  ul{list-style:none; margin:0; padding:8px 12px;}
+  li{background:#141414; border:1px solid #242424; border-left:5px solid #555; border-radius:11px;
+    padding:13px 14px; margin:10px 0;}
+  li.held{border-left-color:#e0433f; background:#170f0f;}
+  li.blocked{opacity:.5;}
+  li.approved{border-left-color:#5fe3a1;}
+
+  .q{font-size:16px; line-height:1.55; font-weight:600; white-space:pre-wrap; word-break:break-word;}
+  .meta{display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:8px; font-size:12px; color:#888;}
+  .who{font-weight:700; color:#FFD166;}
+  .tag{font-weight:800; padding:2px 8px; border-radius:6px; font-size:12px;}
+  .tag.held{background:#e0433f; color:#fff;}
+  .tag.blocked{background:#333; color:#aaa;}
+  .tag.approved{background:#5fe3a1; color:#052;}
+  .tag.live{background:#1d2b1f; color:#7bdc9b;}
+  .drawn{font-weight:700; color:#FFD166;}
+
+  .acts{display:flex; gap:8px; margin-top:12px;}
+  .acts button{flex:1; padding:12px 0; border:none; border-radius:8px; font-size:14px; font-weight:800; cursor:pointer;}
+  .ok{background:#5fe3a1; color:#053;} .no{background:#e0433f; color:#fff;} .undo{background:#262626; color:#bbb;}
+
+  .empty{color:#555; text-align:center; padding:50px 20px; font-size:14px;}
+</style>
+</head>
+<body>
+  <div id="notice" style="display:none;"></div>
+
+  <div id="app" style="display:none;">
+    <header>
+      <h1>QQQQAAAA 後台審核<span class="room">　房間：<span id="room"></span></span></h1>
+
+      <div class="ctrl">
+        <div class="cutoff">
+          <span class="lbl">投稿截止狀態</span>
+          <span class="val" id="cutoffVal">讀取中…</span>
+        </div>
+        <div class="btnrow">
+          <button class="ghost" id="resetCutoffBtn">重設投稿截止</button>
+        </div>
+        <button class="danger" id="clearBtn">⚠ 清空大螢幕（緊急）</button>
+      </div>
+
+      <div class="tabs">
+        <button data-f="pending" class="on">待處理<span class="badge" id="bdg">0</span></button>
+        <button data-f="all">全部</button>
+        <button data-f="blocked">已擋下</button>
+      </div>
+    </header>
+    <ul id="list"></ul>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="blocklist.js"></script>
+  <script>
+  const db = initQQQQDb();
+  if (!db) {
+    document.getElementById('notice').style.display = 'block';
+    document.getElementById('notice').textContent =
+      'Firebase 尚未設定：請在 firebase-config.js 填入 firebaseConfig 後再開啟本頁（目前無法連線資料庫）。';
+  } else {
+    document.getElementById('app').style.display = 'block';
+    document.getElementById('room').textContent = ROOM;
+
+    const subsRef = db.ref('rooms/' + ROOM + '/submissions');
+    const controlRef = db.ref('rooms/' + ROOM + '/control');
+
+    const data = new Map();
+    const q = subsRef.orderByChild('ts').limitToLast(300);
+    q.on('child_added',   s => { data.set(s.key, s.val()); schedule(); });
+    q.on('child_changed', s => { data.set(s.key, s.val()); schedule(); });
+    q.on('child_removed', s => { data.delete(s.key); schedule(); });
+
+    let pending = false;
+    function schedule(){ if(pending) return; pending = true; requestAnimationFrame(() => { pending = false; render(); }); }
+
+    // AUTO_HOLD 關閉時不會有 held 投稿：藏「待處理」分頁、預設看「全部」（blocklist.js 的旗標）
+    let filter = AUTO_HOLD ? 'pending' : 'all';
+    document.querySelectorAll('.tabs button').forEach(b => {
+      if (b.dataset.f === 'pending' && !AUTO_HOLD) { b.style.display = 'none'; return; }
+      b.classList.toggle('on', b.dataset.f === filter);
+      b.onclick = () => {
+        filter = b.dataset.f;
+        document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+        render();
+      };
+    });
+
+    const TAG = { held:'待處理', blocked:'已擋下', approved:'已放行', live:'直播中' };
+    function esc(s){ return (s == null ? '' : String(s)).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+    function hhmmss(ts){ if(typeof ts !== 'number') return ''; return new Date(ts).toLocaleTimeString('zh-TW', {hour12:false}); }
+
+    function render(){
+      const arr = [...data.entries()].map(([key, it]) => ({ key, it, st: statusOf(it) }));
+      arr.sort((a, b) => (b.it.ts || 0) - (a.it.ts || 0));
+      document.getElementById('bdg').textContent = arr.filter(x => x.st === 'held').length;
+
+      const shown = arr.filter(x =>
+        filter === 'pending' ? x.st === 'held' :
+        filter === 'blocked' ? x.st === 'blocked' : true);
+
+      const list = document.getElementById('list');
+      if(!shown.length){
+        list.innerHTML = `<div class="empty">目前沒有${filter==='pending' ? '待處理的投稿 🎉' : '資料'}</div>`;
+        return;
+      }
+
+      list.innerHTML = shown.map(({key, it, st}) => `
+        <li class="${st}">
+          <div class="meta"><span class="who">${esc(it.table)} ${esc(it.nick)}</span></div>
+          <div class="q">${esc(it.question)}</div>
+          <div class="meta">
+            <span class="tag ${st}">${TAG[st]}</span>
+            <span>${hhmmss(it.ts)}</span>
+            ${it.drawnAt ? `<span class="drawn">已抽（${esc(it.tone)} 聲）</span>` : ''}
+          </div>
+          <div class="acts">
+            <button class="ok"   data-k="${key}" data-a="approved">放行</button>
+            <button class="no"   data-k="${key}" data-a="blocked">擋下</button>
+            ${it.status ? `<button class="undo" data-k="${key}" data-a="reset">還原</button>` : ''}
+          </div>
+        </li>`).join('');
+    }
+
+    document.getElementById('list').addEventListener('click', e => {
+      const btn = e.target.closest('button[data-a]'); if(!btn) return;
+      const key = btn.dataset.k, a = btn.dataset.a;
+      if(a === 'reset') subsRef.child(key).child('status').remove();
+      else subsRef.child(key).update({ status: a });
+    });
+
+    document.getElementById('clearBtn').onclick = () => {
+      if(confirm('要把大螢幕上現在所有彈幕清空嗎？'))
+        controlRef.child('clearAt').set(firebase.database.ServerValue.TIMESTAMP);
+    };
+
+    document.getElementById('resetCutoffBtn').onclick = () => {
+      if(confirm('要重設投稿截止時間嗎？重設後下一次抽題會重新鎖定截止時間，彩排用。'))
+        controlRef.child('drawCutoffAt').remove();
+    };
+
+    const cutoffVal = document.getElementById('cutoffVal');
+    controlRef.child('drawCutoffAt').on('value', snap => {
+      const v = snap.val();
+      if (typeof v === 'number') {
+        cutoffVal.textContent = '已於 ' + hhmmss(v) + ' 鎖定';
+        cutoffVal.className = 'val locked';
+      } else {
+        cutoffVal.textContent = '未鎖定';
+        cutoffVal.className = 'val open';
+      }
+    });
+  }
+  </script>
+</body>
+</html>

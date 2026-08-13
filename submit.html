@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>支薪好友專場 · 投稿</title>
+<style>
+  :root{
+    --bg:#0a0a0a;
+    --ink:#FFFDF6;
+    --yellow:#FFD166;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; padding:0; background:var(--bg); }
+  body{
+    min-height:100vh;
+    color:var(--ink);
+    font-family:-apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+    padding:20px 18px 48px;
+  }
+  .fb-warning{
+    display:none;
+    background:var(--yellow);
+    color:#1a1200;
+    font-size:13px;
+    font-weight:700;
+    padding:10px 14px;
+    border-radius:8px;
+    margin-bottom:16px;
+    line-height:1.5;
+  }
+  .fb-warning.show{ display:block; }
+
+  .tag{
+    color:var(--yellow);
+    font-size:12px;
+    font-weight:700;
+    letter-spacing:.18em;
+    margin:2px 0 8px;
+  }
+  h1{
+    font-size:22px;
+    font-weight:800;
+    line-height:1.4;
+    margin:0 0 14px;
+  }
+  .hint{
+    background:rgba(255,209,102,.08);
+    border:1px solid rgba(255,209,102,.5);
+    border-radius:10px;
+    padding:12px 14px;
+    font-size:14px;
+    line-height:1.6;
+    color:var(--ink);
+    margin-bottom:22px;
+  }
+
+  .field{ margin-bottom:20px; }
+  .field-label-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    margin-bottom:8px;
+  }
+  label{
+    font-size:15px;
+    font-weight:700;
+    color:var(--ink);
+  }
+  .counter{
+    font-size:13px;
+    color:rgba(255,253,246,.6);
+    font-variant-numeric:tabular-nums;
+  }
+  .counter.limit{ color:var(--yellow); }
+
+  select,
+  input[type=text],
+  textarea{
+    width:100%;
+    font-size:17px;
+    padding:14px 12px;
+    border-radius:10px;
+    border:1px solid rgba(255,250,235,.22);
+    background:#1a1a1a;
+    color:var(--ink);
+    outline:none;
+    font-family:inherit;
+    -webkit-appearance:none;
+    appearance:none;
+  }
+  select:focus,
+  input[type=text]:focus,
+  textarea:focus{
+    border-color:var(--yellow);
+  }
+  textarea{ resize:none; min-height:88px; line-height:1.6; }
+
+  .field.invalid select,
+  .field.invalid input[type=text],
+  .field.invalid textarea{
+    border-color:#ff6b6b;
+  }
+
+  .preview{
+    font-size:13px;
+    color:rgba(255,253,246,.55);
+    margin:4px 0 22px;
+    line-height:1.6;
+    word-break:break-all;
+  }
+  .preview b{ color:var(--ink); font-weight:600; }
+
+  .error-msg{
+    display:none;
+    color:#ff6b6b;
+    font-size:14px;
+    font-weight:700;
+    margin:-4px 0 16px;
+  }
+  .error-msg.show{ display:block; }
+
+  .submit-btn{
+    display:block;
+    width:100%;
+    min-height:54px;
+    font-size:18px;
+    font-weight:800;
+    padding:16px 0;
+    border:none;
+    border-radius:12px;
+    background:var(--yellow);
+    color:#1a1200;
+  }
+  .submit-btn:disabled{ opacity:.55; }
+</style>
+</head>
+<body>
+
+  <div class="fb-warning" id="fbWarning">尚未設定 Firebase（請填 firebase-config.js）</div>
+
+  <div class="tag">支薪好友專場</div>
+  <h1>投稿你想問支薪好友的問題</h1>
+
+  <div class="hint">請幫我們寫兩個人都能回答的開放式問題，不要只針對其中一人問、也不要是選擇題噢！</div>
+
+  <form id="submitForm" novalidate>
+    <div class="field" id="tableField">
+      <label for="tableSelect">你的桌號</label>
+      <div style="margin-top:8px;">
+        <select id="tableSelect">
+          <option value="" disabled selected>請選擇</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field" id="nickField">
+      <div class="field-label-row">
+        <label for="nickInput">暱稱</label>
+        <span class="counter" id="nickCounter">0/4</span>
+      </div>
+      <input type="text" id="nickInput" autocomplete="off">
+    </div>
+
+    <div class="field" id="questionField">
+      <div class="field-label-row">
+        <label for="questionInput">想問的問題</label>
+        <span class="counter" id="questionCounter">0/25</span>
+      </div>
+      <textarea id="questionInput"></textarea>
+    </div>
+
+    <div class="preview" id="previewLine">上幕預覽：{桌號} {暱稱}｜{問題}</div>
+
+    <div class="error-msg" id="errorMsg">請完整填寫桌號、暱稱與問題</div>
+
+    <button type="submit" class="submit-btn" id="submitBtn">送出問題</button>
+  </form>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script>
+    (function(){
+      var NICK_LIMIT = 4;
+      var QUESTION_LIMIT = 25;
+
+      var $ = function(id){ return document.getElementById(id); };
+      var tableSelect = $('tableSelect');
+      var nickInput = $('nickInput');
+      var questionInput = $('questionInput');
+      var nickCounter = $('nickCounter');
+      var questionCounter = $('questionCounter');
+      var previewLine = $('previewLine');
+      var errorMsg = $('errorMsg');
+      var submitForm = $('submitForm');
+      var submitBtn = $('submitBtn');
+      var fbWarning = $('fbWarning');
+      var tableField = $('tableField');
+      var nickField = $('nickField');
+      var questionField = $('questionField');
+
+      // 產生桌號選項 B3–B30
+      for (var n = 3; n <= 30; n++) {
+        var opt = document.createElement('option');
+        opt.value = 'B' + n;
+        opt.textContent = 'B' + n;
+        tableSelect.appendChild(opt);
+      }
+
+      function esc(s){
+        return String(s == null ? '' : s).replace(/[&<>]/g, function(c){
+          return c === '&' ? '&amp;' : (c === '<' ? '&lt;' : '&gt;');
+        });
+      }
+
+      // 以 code point（Array.from）計數，超過上限則截斷輸入
+      function clampToCodePoints(el, limit, counterEl){
+        var arr = Array.from(el.value);
+        if (arr.length > limit) {
+          el.value = arr.slice(0, limit).join('');
+          arr = Array.from(el.value);
+        }
+        counterEl.textContent = arr.length + '/' + limit;
+        counterEl.classList.toggle('limit', arr.length >= limit);
+      }
+
+      function updatePreview(){
+        var table = tableSelect.value || '{桌號}';
+        var nick = nickInput.value.trim() || '{暱稱}';
+        var question = questionInput.value.trim() || '{問題}';
+        previewLine.innerHTML =
+          '上幕預覽：<b>' + esc(table) + '</b> <b>' + esc(nick) + '</b>｜' + esc(question);
+      }
+
+      nickInput.addEventListener('input', function(){
+        clampToCodePoints(nickInput, NICK_LIMIT, nickCounter);
+        updatePreview();
+      });
+      questionInput.addEventListener('input', function(){
+        clampToCodePoints(questionInput, QUESTION_LIMIT, questionCounter);
+        updatePreview();
+      });
+      tableSelect.addEventListener('change', updatePreview);
+      updatePreview();
+
+      function showError(fields){
+        [tableField, nickField, questionField].forEach(function(f){ f.classList.remove('invalid'); });
+        fields.forEach(function(f){ f.classList.add('invalid'); });
+        errorMsg.classList.add('show');
+      }
+      function clearError(){
+        [tableField, nickField, questionField].forEach(function(f){ f.classList.remove('invalid'); });
+        errorMsg.classList.remove('show');
+      }
+
+      // ─ Firebase 初始化 ─
+      var db = null;
+      try {
+        db = (typeof initQQQQDb === 'function') ? initQQQQDb() : null;
+      } catch (e) {
+        db = null;
+      }
+
+      if (!db) {
+        fbWarning.classList.add('show');
+        submitBtn.disabled = true;
+      }
+
+      submitForm.addEventListener('submit', function(ev){
+        ev.preventDefault();
+        if (!db) { return; }
+
+        var table = tableSelect.value.trim();
+        var nick = nickInput.value.trim();
+        var question = questionInput.value.trim();
+
+        var invalidFields = [];
+        if (!table) invalidFields.push(tableField);
+        if (!nick) invalidFields.push(nickField);
+        if (!question) invalidFields.push(questionField);
+
+        if (invalidFields.length > 0) {
+          showError(invalidFields);
+          return;
+        }
+        clearError();
+
+        submitBtn.disabled = true;
+        var originalLabel = submitBtn.textContent;
+
+        db.ref('rooms/' + ROOM + '/submissions').push({
+          table: table,
+          nick: nick,
+          question: question,
+          ts: firebase.database.ServerValue.TIMESTAMP
+        }).then(function(){
+          questionInput.value = '';
+          clampToCodePoints(questionInput, QUESTION_LIMIT, questionCounter);
+          updatePreview();
+          submitBtn.textContent = '已送出！再問一題';
+          setTimeout(function(){
+            submitBtn.textContent = originalLabel;
+            submitBtn.disabled = false;
+          }, 600);
+        }).catch(function(err){
+          showError([]);
+          errorMsg.textContent = '送出失敗，請檢查網路後再試';
+          errorMsg.classList.add('show');
+          submitBtn.disabled = false;
+        });
+      });
+    })();
+  </script>
+</body>
+</html>
