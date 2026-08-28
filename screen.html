@@ -72,6 +72,7 @@
   #panel .acts{display:flex; gap:8px; margin-top:16px;}
   #panel .acts button{flex:1; font-size:14px; font-weight:800; padding:10px 0; border:none; border-radius:8px; cursor:pointer;}
   #saveBtn{background:#fff; color:#000;} #resetBtn{background:#000; color:#888; border:1px solid #333 !important;}
+  #clearAllBtn{background:#2a0d0d; color:#ff6b6b; border:1px solid #7a2020 !important;}
   #panel .keys{font-size:11px; color:#666; margin-top:14px; line-height:1.6;}
 </style>
 </head>
@@ -123,8 +124,11 @@
       <button data-scene="riot">暴動</button>
     </div>
     <div class="acts">
-      <button id="saveBtn">儲存到這台電腦</button>
+      <button id="saveBtn">儲存設定</button>
       <button id="resetBtn">重設預設</button>
+    </div>
+    <div class="acts">
+      <button id="clearAllBtn">⚠ 清空目前題目</button>
     </div>
     <div class="keys">F 全螢幕 · C 控制台 · 空白鍵 暫停 · X 清空全幕 · 1/2/3 情境</div>
   </div>
@@ -236,18 +240,26 @@
 
   /* ===== 資料：投稿彈幕（只收開頁後）＋ 全量計數（含開頁前）===== */
   const subMap = new Map();   // key -> {vis, el}（審核時找得到、撤得掉）
+  const items = new Map();    // key -> submission（彈幕、重播池、題數計數、清空封存共用同一份資料）
   const askerSet = new Set();
   const askerCountEl = document.getElementById('askerCount');
+  function rebuildAskerSet(){
+    askerSet.clear();
+    items.forEach(it => askerSet.add(String(it.table || '') + '\u0001' + String(it.nick || '')));
+    askerCountEl.textContent = askerSet.size;
+  }
+
+  // 清空目前題目：預設（Firebase 未就緒）只報錯；連上 db 後在下方換成真正的封存清空
+  let clearAllQuestions = () => alert('⚠ Firebase 未設定，無法清空');
 
   const db = initQQQQDb();
   if(!db){
     document.getElementById('dbWarn').style.display = 'flex';
   } else {
-    const subsRef = db.ref('rooms/' + ROOM + '/submissions');
+    const roomRef = db.ref('rooms/' + ROOM);
+    const subsRef = roomRef.child('submissions');
     const pageOpenAt = Date.now();   // 只用於 clearAt 判斷，不再過濾投稿（時鐘偏差不影響顯示）
 
-    // 全量訂閱進 items：彈幕、重播池、發問計數共用同一份資料
-    const items = new Map();         // key -> submission
     let initialLoaded = false;
     subsRef.once('value').then(() => { initialLoaded = true; })
                          .catch(() => { initialLoaded = true; });
@@ -265,7 +277,10 @@
       }
     });
 
-    subsRef.on('child_removed', snap => { items.delete(snap.key); subMap.delete(snap.key); });
+    subsRef.on('child_removed', snap => {
+      items.delete(snap.key); subMap.delete(snap.key);
+      rebuildAskerSet();   // 清空／刪除後發問人數要跟著歸零，不能只增不減
+    });
 
     subsRef.on('child_changed', snap => {
       const it = snap.val(); if(!it) return;
@@ -316,6 +331,31 @@
     db.ref('rooms/' + ROOM + '/control/clearAt').on('value', s => {
       const t = s.val(); if(t && t > pageOpenAt) clearScreen();
     });
+
+    // ── 清空目前題目：單一原子多路徑更新（封存搬移，不是刪除）──
+    // 一次 update 完成「投稿原樣搬進 archive/{clearTs}/ ＋ 清空 submissions ＋
+    // 重置抽題控制（drawCutoffAt/lastTone）＋ 發 clearAt 清畫面」。
+    // 全部成功或全部失敗：斷網或規則未發布時整筆被拒，alert 報錯、資料與畫面不變。
+    clearAllQuestions = function(){
+      const n = items.size;
+      const ok = confirm('確定清空目前 ' + n + ' 題？\n題目會封存、發問人數歸零，抽題台將沒有題目可抽。');
+      if(!ok) return;
+      const clearTs = String(Date.now());   // 只作封存批次鍵，不參與任何判斷
+      const updates = {};
+      items.forEach((it, key) => {
+        updates['archive/' + clearTs + '/' + key] = it;
+        updates['submissions/' + key] = null;
+      });
+      updates['control/drawCutoffAt'] = null;
+      updates['control/lastTone'] = null;
+      updates['control/clearAt'] = firebase.database.ServerValue.TIMESTAMP;
+      roomRef.update(updates).then(() => {
+        panel.classList.remove('open');
+      }).catch(err => {
+        alert('⚠ 清空失敗，所有資料未變動。\n原因：' + (err && err.message ? err.message : err) +
+              '\n（常見原因：網路中斷，或 database.rules.json 尚未在 Firebase 後台發布）');
+      });
+    };
   }
 
   /* ===== 控制台 ===== */
@@ -347,6 +387,7 @@
   function togglePanel(){ panel.classList.toggle('open'); if(panel.classList.contains('open')) fillForm(); }
   $('cogBtn').onclick = togglePanel;
   $('saveBtn').onclick = () => { readForm(); panel.classList.remove('open'); };
+  $('clearAllBtn').onclick = () => clearAllQuestions();
   $('resetBtn').onclick = () => { cfg = {...DEFAULTS}; laneBusyUntil = new Array(cfg.lanes).fill(0); localStorage.setItem(LS, JSON.stringify(cfg)); fillForm(); };
   document.querySelectorAll('.scenes button').forEach(b => b.onclick = () => setScene(b.dataset.scene));
 
@@ -387,7 +428,7 @@
   });
 
   setInterval(() => { $('stat').textContent =
-    `佇列 ${queue.length} · 螢幕 ${onScreen} · 發問 ${askerSet.size}` + (paused ? ' · ⏸' : ''); }, 300);
+    `目前題數 ${items.size}` + (paused ? ' · ⏸' : ''); }, 300);
   </script>
 </body>
 </html>
