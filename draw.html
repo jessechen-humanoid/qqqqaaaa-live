@@ -99,11 +99,14 @@
   #panel .keys{font-size:11px; color:#666; margin-top:14px; line-height:1.6;}
 
   /* ===== 開場畫面：企劃名稱覆蓋層（蓋住一切，任意鍵/點擊才進場）===== */
+  /* 標題放畫面偏上（與抽題題目同高＝spacerTop 的 12vh），後排觀眾才看得清楚；
+     跟著 --yoff 投影對位偏移一起動，投影喬好後開場與題目落在同一位置 */
   #splash{position:fixed; inset:0; z-index:100; background:var(--bg);
-    display:flex; align-items:center; justify-content:center; cursor:pointer;}
+    display:flex; align-items:flex-start; justify-content:center; cursor:pointer;}
   #splash.hidden{display:none;}
   #splashTitle{font-weight:900; font-size:min(9vw,14vh); letter-spacing:.06em; color:var(--ivory);
-    text-align:center; text-shadow:0 2px 14px #000; padding:0 4vw;}
+    text-align:center; text-shadow:0 2px 14px #000; padding:0 4vw;
+    margin-top:12vh; transform:translateY(var(--yoff, 0vh));}
   #splashTitle .pfx{color:var(--yellow); font-size:.55em; display:block; margin-bottom:1.2vh; letter-spacing:.3em;}
 </style>
 </head>
