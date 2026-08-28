@@ -95,10 +95,21 @@
   #panel .acts{display:flex; gap:8px; margin-top:16px;}
   #panel .acts button{flex:1; font-size:14px; font-weight:800; padding:10px 0; border:none; border-radius:8px; cursor:pointer;}
   #saveBtn{background:#fff; color:#000;} #resetBtn{background:#000; color:#888; border:1px solid #333 !important;}
+  #restartBtn{background:#000; color:var(--yellow); border:1px solid #7a6a2e !important;}
   #panel .keys{font-size:11px; color:#666; margin-top:14px; line-height:1.6;}
+
+  /* ===== 開場畫面：企劃名稱覆蓋層（蓋住一切，任意鍵/點擊才進場）===== */
+  #splash{position:fixed; inset:0; z-index:100; background:var(--bg);
+    display:flex; align-items:center; justify-content:center; cursor:pointer;}
+  #splash.hidden{display:none;}
+  #splashTitle{font-weight:900; font-size:min(9vw,14vh); letter-spacing:.06em; color:var(--ivory);
+    text-align:center; text-shadow:0 2px 14px #000; padding:0 4vw;}
+  #splashTitle .pfx{color:var(--yellow); font-size:.55em; display:block; margin-bottom:1.2vh; letter-spacing:.3em;}
 </style>
 </head>
 <body>
+  <div id="splash"><div id="splashTitle"><span class="pfx">企劃</span>QQQQAAAA</div></div>
+
   <div id="spacerTop"></div>
 
   <div id="stage">
@@ -132,8 +143,11 @@
     <label>洗牌動畫時長（ms）</label>
     <input id="f_shuffleMs" type="number" step="50" min="200" max="2000">
     <div class="acts">
-      <button id="saveBtn">儲存到這台電腦</button>
+      <button id="saveBtn">儲存設定</button>
       <button id="resetBtn">重設預設</button>
+    </div>
+    <div class="acts">
+      <button id="restartBtn">重新開始（回開場畫面）</button>
     </div>
     <div class="keys">空白鍵 抽題 · F 全螢幕 · C 控制台</div>
   </div>
@@ -208,6 +222,27 @@
   var standbyEl = $('standby'), contentEl = $('content'), emptyEl = $('emptyState'), errorEl = $('errorState');
   var questionEl = $('question'), toneNumEl = $('toneNum'), pillEl = $('pill');
   var statEl = $('stat'), panel = $('panel'), pendingWarnEl = $('pendingWarn');
+  var splashEl = $('splash');
+
+  /* ===== 開場畫面（企劃 QQQQAAAA）=====
+     覆蓋層可見時任何鍵/點擊只負責進場，絕不觸發抽題（含空白鍵）。
+     「重新開始」只是回到這個畫面＋舞台重置為待機：不動 drawnSet、cutoff 快取
+     與任何 Firebase 資料，已抽過的題維持已抽。 */
+  var splashVisible = true;
+  function enterFromSplash(){
+    splashVisible = false;
+    splashEl.classList.add('hidden');
+  }
+  function showSplash(){
+    splashVisible = true;
+    splashEl.classList.remove('hidden');
+    hideErrorBox();
+    contentEl.hidden = true;
+    emptyEl.hidden = true;
+    standbyEl.hidden = false;
+    panel.classList.remove('open');
+  }
+  splashEl.addEventListener('click', function(){ if(splashVisible) enterFromSplash(); });
 
   // 複驗回歸A：showError 可關閉（僅 Esc，避免空白鍵清框誤抽）；非 init 類錯誤（persistent 未傳/false）5 秒自動淡出，
   // init 類（persistent=true）不自動淡出，但仍可手動關閉。
@@ -467,10 +502,17 @@
   }
 
   function draw(){
+    if(splashVisible) return;   // 開場畫面蓋著時不可能抽題（進場鍵也不算抽）
     if(isDrawing) return;
     if(!db){ showError('⚠ Firebase 未設定，無法抽題。'); return; }
     // 問題3/5：ready gate——submissions 首批資料與 lastTone 首次同步都完成前，先顯示載入中，不真的抽題。
     if(!(subsReady && toneReady)){ showLoadingState(); return; }
+    // 題庫全空（先不看截止線）時只顯示抽完、絕不鎖定 cutoff：
+    // 否則清空後有人先按了抽題，截止會鎖在空庫時刻，之後觀眾投的題全部進不了池。
+    if(buildPool(Array.from(submissionsById.values()), null, drawnSet, isEligible).length === 0){
+      showEmptyState();
+      return;
+    }
     isDrawing = true;
     ensureCutoff().then(function(){
       var pool = currentPool();
@@ -513,6 +555,7 @@
     applyCfg(); fillForm();
   };
   $('drawBtn').onclick = draw;
+  $('restartBtn').onclick = showSplash;
 
   /* ===== 全螢幕 + 快捷鍵 ===== */
   var fsBtn = $('fsBtn');
@@ -551,6 +594,11 @@
 
   addEventListener('keydown', function(e){
     if(e.target && e.target.matches && e.target.matches('input,textarea,select')) return;
+    if(splashVisible){   // 開場畫面：任意鍵只進場，該次按鍵不做其他任何事（含抽題）
+      e.preventDefault();
+      if(!e.repeat) enterFromSplash();
+      return;
+    }
     if(e.key === ' ') e.preventDefault();   // 一律擋掉預設捲動，即使按住不放也不能讓畫面滾走
     var isUp = e.key === 'ArrowUp' || e.key === 'Up';       // 'Up'/'Down' 為舊式命名，一併支援
     var isDown = e.key === 'ArrowDown' || e.key === 'Down';
